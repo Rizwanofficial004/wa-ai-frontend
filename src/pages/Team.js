@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { agentApi, inviteApi } from '../services/api';
 import ViewToggle from '../components/ViewToggle';
 
@@ -116,16 +116,7 @@ const TeamManagement = () => {
     alert('Invite link copied!');
   };
 
-  const handleAcceptHandoff = async (conversationId) => {
-    try {
-      await agentApi.assignAgent(businessId, conversationId, 'current-agent-id');
-      fetchData();
-    } catch (error) {
-      console.error('Error accepting handoff:', error);
-    }
-  };
-
-  const handleDeleteAgent = async (agentId) => {
+    const handleDeleteAgent = async (agentId) => {
     if (!window.confirm('Are you sure you want to remove this team member?')) return;
     try {
       await agentApi.delete(businessId, agentId);
@@ -216,12 +207,12 @@ const TeamManagement = () => {
                     {new Date(item.requestedAt).toLocaleString()}
                   </p>
                 </div>
-                <button 
-                  onClick={() => handleAcceptHandoff(item.conversationId)}
+                <Link
+                  to={`/businesses/${businessId}/conversations?open=${item.conversationId || item.conversation?._id}`}
                   style={styles.acceptBtn}
                 >
-                  Accept
-                </button>
+                  Reply in Inbox
+                </Link>
               </div>
             ))}
           </div>
@@ -486,7 +477,7 @@ const styles = {
   handoffItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', borderBottom: '1px solid #f1f5f9' },
   handoffReason: { fontSize: '13px', color: '#64748b', margin: '4px 0' },
   handoffTime: { fontSize: '12px', color: '#94a3b8', margin: 0 },
-  acceptBtn: { padding: '8px 16px', backgroundColor: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' },
+  acceptBtn: { padding: '8px 16px', backgroundColor: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', textDecoration: 'none', fontSize: '13px', fontWeight: 500 },
   agentsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px' },
   agentCard: { backgroundColor: '#fff', padding: '20px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' },
   agentHeader: { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' },

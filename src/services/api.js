@@ -16,6 +16,9 @@ api.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    if (config.data instanceof FormData) {
+      delete config.headers['Content-Type'];
+    }
     return config;
   },
   (error) => {
@@ -77,7 +80,11 @@ export const conversationApi = {
   updateStatus: (businessId, conversationId, status) => 
     api.put(`/businesses/${businessId}/conversations/${conversationId}/status`, { status }),
   getMessages: (businessId, conversationId) => 
-    api.get(`/businesses/${businessId}/conversations/${conversationId}/messages`)
+    api.get(`/businesses/${businessId}/conversations/${conversationId}/messages`),
+  sendMessage: (businessId, conversationId, content) =>
+    api.post(`/businesses/${businessId}/conversations/${conversationId}/messages`, { content }),
+  requestHandoff: (businessId, conversationId, reason = 'manual') =>
+    api.post(`/businesses/${businessId}/conversations/${conversationId}/handoff`, { reason })
 };
 
 // =====================
@@ -171,7 +178,15 @@ export const knowledgeApi = {
   create: (businessId, data) => api.post(`/businesses/${businessId}/knowledge`, data),
   update: (businessId, knowledgeId, data) => api.put(`/businesses/${businessId}/knowledge/${knowledgeId}`, data),
   delete: (businessId, knowledgeId) => api.delete(`/businesses/${businessId}/knowledge/${knowledgeId}`),
-  seed: (businessId) => api.post(`/businesses/${businessId}/knowledge/seed`)
+  seed: (businessId) => api.post(`/businesses/${businessId}/knowledge/seed`),
+  uploadPdf: (businessId, file, extra = {}) => {
+    const form = new FormData();
+    form.append('file', file);
+    if (extra.title) form.append('title', extra.title);
+    if (extra.category) form.append('category', extra.category);
+    if (extra.tags) form.append('tags', extra.tags);
+    return api.post(`/businesses/${businessId}/knowledge/upload`, form);
+  }
 };
 
 // =====================

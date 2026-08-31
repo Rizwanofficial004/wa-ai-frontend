@@ -12,6 +12,7 @@ const KnowledgeBase = () => {
   const [testResponse, setTestResponse] = useState(null);
   const [testingAI, setTestingAI] = useState(false);
   const [seeding, setSeeding] = useState(false);
+  const [uploadingPdf, setUploadingPdf] = useState(false);
   const [formData, setFormData] = useState({
     title: '',
     content: '',
@@ -49,6 +50,41 @@ const KnowledgeBase = () => {
       toast.error(error.response?.data?.message || 'Failed to seed data');
     } finally {
       setSeeding(false);
+    }
+  };
+
+  const handlePdfUpload = async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (!files.length) return;
+
+    const pdfs = files.filter((file) => file.name.toLowerCase().endsWith('.pdf'));
+    if (!pdfs.length) {
+      toast.error('Please upload PDF files');
+      return;
+    }
+    if (pdfs.length !== files.length) {
+      toast.error('Only PDF files were uploaded');
+    }
+
+    setUploadingPdf(true);
+    let uploaded = 0;
+    try {
+      for (const file of pdfs) {
+        const res = await knowledgeApi.uploadPdf(businessId, file, { category: 'policy' });
+        if (res.data?.success) uploaded += 1;
+      }
+      toast.success(
+        uploaded === 1
+          ? 'PDF uploaded. The WhatsApp bot will use these business rules.'
+          : `${uploaded} PDFs uploaded. The WhatsApp bot will use these business rules.`
+      );
+      await fetchKnowledge();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to upload PDF');
+      fetchKnowledge();
+    } finally {
+      setUploadingPdf(false);
     }
   };
 
@@ -100,6 +136,10 @@ const KnowledgeBase = () => {
     { value: 'custom', label: 'Custom', icon: '⚙️' }
   ];
 
+  const isPdfItem = (item) => item?.metadata?.source === 'pdf' || !!item?.metadata?.filename;
+  const pdfFiles = knowledge.filter(isPdfItem);
+  const otherItems = knowledge.filter((item) => !isPdfItem(item));
+
   if (loading) {
     return <div style={styles.loading}>Loading knowledge base...</div>;
   }
@@ -110,9 +150,9 @@ const KnowledgeBase = () => {
         <div>
           <Link to={`/businesses/${businessId}`} style={styles.backLink}>← Back to Business</Link>
           <h1 style={styles.title}>Knowledge Base</h1>
-          <p style={styles.subtitle}>Train your AI with custom knowledge</p>
+          <p style={styles.subtitle}>Upload a PDF of your business rules, or add FAQs. The WhatsApp bot answers from this.</p>
         </div>
-        <div style={{ display: 'flex', gap: '12px' }}>
+        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', flexShrink: 0 }}>
           <button 
             onClick={handleSeedData} 
             disabled={seeding || knowledge.length > 0}
@@ -124,6 +164,22 @@ const KnowledgeBase = () => {
           >
             {seeding ? '⏳ Seeding...' : '🌱 Seed Sample Data'}
           </button>
+          <label style={{
+            ...styles.addButton,
+            backgroundColor: '#0f766e',
+            opacity: uploadingPdf ? 0.6 : 1,
+            cursor: uploadingPdf ? 'not-allowed' : 'pointer'
+          }}>
+            {uploadingPdf ? 'Uploading PDF...' : 'Upload PDF rules'}
+            <input
+              type="file"
+              accept="application/pdf,.pdf"
+              multiple
+              onChange={handlePdfUpload}
+              disabled={uploadingPdf}
+              style={{ display: 'none' }}
+            />
+          </label>
           <button onClick={() => setShowModal(true)} style={styles.addButton}>
             + Add Knowledge
           </button>
@@ -154,7 +210,7 @@ const KnowledgeBase = () => {
                 <div style={styles.sources}>
                   <span style={styles.sourcesLabel}>Sources: </span>
                   {testResponse.sources.map((s, i) => (
-                    <span key={i} style={styles.sourceBadge}>{s.title}</span>
+                    <span key={i} style={styles.sourceBadge}>{s.filename || s.title}</span>
                   ))}
                 </div>
               )}
@@ -163,20 +219,52 @@ const KnowledgeBase = () => {
         </div>
       </div>
 
+      {/* Uploaded PDFs */}
+      <div style={{ ...styles.section, marginBottom: '24px' }}>
+        <h2 style={styles.sectionTitle}>Uploaded files ({pdfFiles.length})</h2>
+        {pdfFiles.length === 0 ? (
+          <p style={styles.emptyText}>No PDFs yet. Upload one or more business-rule files. The bot reads these when customers ask questions.</p>
+        ) : (
+          <div style={styles.grid}>
+            {pdfFiles.map((item) => (
+              <div key={item._id} style={styles.card}>
+                <div style={styles.cardHeader}>
+                  <span style={styles.cardIcon}>📄</span>
+                  <button onClick={() => handleDelete(item._id)} style={styles.deleteBtn}>
+                    Delete
+                  </button>
+                </div>
+                <h3 style={styles.cardTitle}>{item.metadata?.filename || item.title}</h3>
+                <p style={{ fontSize: '12px', color: '#0f766e', marginBottom: '8px' }}>
+                  {item.metadata?.chunkCount || 0} sections
+                  {item.createdAt ? ` · ${new Date(item.createdAt).toLocaleString()}` : ''}
+                </p>
+                <p style={styles.cardContent}>
+                  {(item.content || '').length > 150
+                    ? `${item.content.substring(0, 150)}...`
+                    : (item.content || 'Business rules from this PDF')}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Knowledge Base List */}
       <div style={styles.section}>
-        <h2 style={styles.sectionTitle}>Knowledge Items ({knowledge.length})</h2>
-        {knowledge.length === 0 ? (
+        <h2 style={styles.sectionTitle}>Knowledge Items ({otherItems.length})</h2>
+        {otherItems.length === 0 ? (
           <div style={styles.emptyState}>
-            <p style={styles.emptyText}>No knowledge base items yet</p>
+            <p style={styles.emptyText}>No FAQ items yet</p>
             <button onClick={() => setShowModal(true)} style={styles.emptyButton}>
-              Add your first knowledge item
+              Add knowledge item
             </button>
           </div>
         ) : (
           <div style={styles.grid}>
-            {knowledge.map((item) => {
+            {otherItems.map((item) => {
               const category = categories.find(c => c.value === item.category);
+              const preview = item.content || '';
               return (
                 <div key={item._id} style={styles.card}>
                   <div style={styles.cardHeader}>
@@ -187,7 +275,7 @@ const KnowledgeBase = () => {
                   </div>
                   <h3 style={styles.cardTitle}>{item.title}</h3>
                   <p style={styles.cardContent}>
-                    {item.content.length > 150 ? item.content.substring(0, 150) + '...' : item.content}
+                    {preview.length > 150 ? preview.substring(0, 150) + '...' : preview}
                   </p>
                   <div style={styles.cardFooter}>
                     <span style={styles.cardCategory}>{category?.label || item.category}</span>
@@ -285,8 +373,9 @@ const styles = {
   },
   header: {
     display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: '16px',
     marginBottom: '32px'
   },
   backLink: {
@@ -314,7 +403,10 @@ const styles = {
     borderRadius: '8px',
     fontSize: '14px',
     fontWeight: '500',
-    cursor: 'pointer'
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+    display: 'inline-flex',
+    alignItems: 'center'
   },
   seedButton: {
     padding: '12px 20px',
@@ -324,7 +416,8 @@ const styles = {
     borderRadius: '8px',
     fontSize: '14px',
     fontWeight: '500',
-    cursor: 'pointer'
+    cursor: 'pointer',
+    whiteSpace: 'nowrap'
   },
   testSection: {
     backgroundColor: '#fff',

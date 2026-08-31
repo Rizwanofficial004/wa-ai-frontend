@@ -1,36 +1,98 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import api from '../services/api';
+import React, { useState, useEffect, useRef } from 'react';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
+import api, { conversationApi, agentApi } from '../services/api';
 import toast from 'react-hot-toast';
+
+const waitingForHuman = (conv) => conv && (!conv.isBotActive || conv.handoffRequested);
+
+const senderLabel = (sender) => {
+  if (sender === 'customer') return 'Customer';
+  if (sender === 'agent') return 'You';
+  return 'AI';
+};
 
 const Conversations = () => {
   const { businessId } = useParams();
+  const [searchParams] = useSearchParams();
   const [conversations, setConversations] = useState([]);
   const [selectedConversation, setSelectedConversation] = useState(null);
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [replyMessage, setReplyMessage] = useState('');
+  const [sending, setSending] = useState(false);
+  const selectedIdRef = useRef(null);
+  const messagesEndRef = useRef(null);
+
+  selectedIdRef.current = selectedConversation?._id || null;
 
   useEffect(() => {
     fetchConversations();
   }, [businessId]);
 
-  const fetchConversations = async () => {
+  useEffect(() => {
+    const openId = searchParams.get('open');
+    if (!openId || conversations.length === 0) return;
+    const match = conversations.find((conv) => conv._id === openId);
+    if (match && selectedIdRef.current !== openId) {
+      selectConversation(match);
+    }
+  }, [conversations, searchParams]);
+
+  useEffect(() => {
+    if (!selectedConversation?._id) return undefined;
+    const timer = setInterval(() => {
+      refreshOpenConversation(selectedConversation._id);
+      fetchConversations(true);
+    }, 6000);
+    return () => clearInterval(timer);
+  }, [selectedConversation?._id, businessId]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  const fetchConversations = async (silent = false) => {
     try {
       const res = await api.get(`/businesses/${businessId}/conversations`);
-      setConversations(res.data.data);
+      const list = res.data.data || [];
+      list.sort((a, b) => Number(waitingForHuman(b)) - Number(waitingForHuman(a)));
+      setConversations(list);
+      setSelectedConversation((prev) => {
+        if (!prev) return prev;
+        const fresh = list.find((conv) => conv._id === prev._id);
+        return fresh ? { ...prev, ...fresh } : prev;
+      });
     } catch (error) {
-      toast.error('Failed to fetch conversations');
+      if (!silent) toast.error('Failed to fetch conversations');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
+    }
+  };
+
+  const refreshOpenConversation = async (conversationId) => {
+    try {
+      const res = await api.get(`/businesses/${businessId}/conversations/${conversationId}`);
+      if (selectedIdRef.current !== conversationId) return;
+      setMessages(res.data.data.messages || []);
+      if (res.data.data.conversation) {
+        setSelectedConversation((prev) =>
+          prev && prev._id === conversationId ? { ...prev, ...res.data.data.conversation } : prev
+        );
+      }
+    } catch (error) {
+      // Keep the current view if a background refresh fails.
     }
   };
 
   const selectConversation = async (conversation) => {
     setSelectedConversation(conversation);
+    setReplyMessage('');
     try {
       const res = await api.get(`/businesses/${businessId}/conversations/${conversation._id}`);
-      setMessages(res.data.data.messages);
+      setMessages(res.data.data.messages || []);
+      if (res.data.data.conversation) {
+        setSelectedConversation({ ...conversation, ...res.data.data.conversation });
+      }
     } catch (error) {
       toast.error('Failed to fetch messages');
     }
@@ -46,9 +108,64 @@ const Conversations = () => {
     }
   };
 
+  const sendReply = async () => {
+    const content = replyMessage.trim();
+    if (!content || !selectedConversation || sending) return;
+
+    setSending(true);
+    try {
+      const res = await conversationApi.sendMessage(businessId, selectedConversation._id, content);
+      const data = res.data.data;
+      setReplyMessage('');
+      if (data?.message) {
+        setMessages((prev) => [...prev, data.message]);
+      }
+      if (data?.conversation) {
+        setSelectedConversation((prev) => ({ ...prev, ...data.conversation }));
+      }
+      toast.success('Sent to customer');
+      fetchConversations(true);
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to send message');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const takeOver = async () => {
+    if (!selectedConversation) return;
+    try {
+      const res = await conversationApi.requestHandoff(businessId, selectedConversation._id, 'manual');
+      setSelectedConversation((prev) => ({ ...prev, ...res.data.data }));
+      toast.success('AI paused. You can reply to the customer now.');
+      fetchConversations(true);
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to take over chat');
+    }
+  };
+
+  const returnToAi = async () => {
+    if (!selectedConversation) return;
+    try {
+      await agentApi.returnToBot(businessId, selectedConversation._id);
+      setSelectedConversation((prev) => ({
+        ...prev,
+        isBotActive: true,
+        handoffRequested: false,
+        handoffReason: null
+      }));
+      toast.success('AI will reply to this customer again');
+      fetchConversations(true);
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to return chat to AI');
+    }
+  };
+
   if (loading) {
     return <div style={styles.loading}>Loading conversations...</div>;
   }
+
+  const humanNeeded = waitingForHuman(selectedConversation);
 
   return (
     <div style={styles.container}>
@@ -56,11 +173,13 @@ const Conversations = () => {
         <div>
           <Link to={`/businesses/${businessId}`} style={styles.backLink}>← Back to Business</Link>
           <h1 style={styles.title}>Conversations</h1>
+          <p style={styles.subtitle}>
+            AI replies first. If it cannot answer, the chat waits here for you.
+          </p>
         </div>
       </div>
 
       <div style={styles.chatContainer}>
-        {/* Conversations List */}
         <div style={styles.sidebar}>
           {conversations.length === 0 ? (
             <div style={styles.emptySidebar}>
@@ -83,18 +202,22 @@ const Conversations = () => {
                   </span>
                 </div>
                 <div style={styles.convPhone}>{conv.customerPhone}</div>
-                <span style={{
-                  ...styles.convStatus,
-                  backgroundColor: conv.status === 'active' ? '#10b981' : conv.status === 'pending' ? '#f59e0b' : '#6b7280'
-                }}>
-                  {conv.status}
-                </span>
+                <div style={styles.badgeRow}>
+                  <span style={{
+                    ...styles.convStatus,
+                    backgroundColor: conv.status === 'active' ? '#10b981' : conv.status === 'pending' ? '#f59e0b' : '#6b7280'
+                  }}>
+                    {conv.status}
+                  </span>
+                  {waitingForHuman(conv) && (
+                    <span style={styles.waitingBadge}>Needs you</span>
+                  )}
+                </div>
               </div>
             ))
           )}
         </div>
 
-        {/* Messages Area */}
         <div style={styles.messagesArea}>
           {selectedConversation ? (
             <>
@@ -106,6 +229,15 @@ const Conversations = () => {
                   <p style={styles.messagesSubtitle}>{selectedConversation.customerPhone}</p>
                 </div>
                 <div style={styles.statusActions}>
+                  {humanNeeded ? (
+                    <button onClick={returnToAi} style={styles.returnBtn}>
+                      Return to AI
+                    </button>
+                  ) : (
+                    <button onClick={takeOver} style={styles.takeOverBtn}>
+                      Take over
+                    </button>
+                  )}
                   <select
                     value={selectedConversation.status}
                     onChange={(e) => updateStatus(e.target.value)}
@@ -118,38 +250,64 @@ const Conversations = () => {
                 </div>
               </div>
 
+              {humanNeeded && (
+                <div style={styles.handoffBanner}>
+                  AI is paused. Reply below and it will go to the customer on WhatsApp.
+                </div>
+              )}
+
               <div style={styles.messagesList}>
                 {messages.map((msg) => (
                   <div
                     key={msg._id}
                     style={{
                       ...styles.message,
-                      ...(msg.sender === 'customer' ? styles.messageCustomer : styles.messageAI)
+                      ...(msg.sender === 'customer'
+                        ? styles.messageCustomer
+                        : msg.sender === 'agent'
+                          ? styles.messageAgent
+                          : styles.messageAI)
                     }}
                   >
                     <div style={styles.messageContent}>{msg.content}</div>
                     <div style={styles.messageMeta}>
-                      <span style={styles.messageSender}>
-                        {msg.sender === 'customer' ? 'Customer' : 'AI'}
-                      </span>
+                      <span style={styles.messageSender}>{senderLabel(msg.sender)}</span>
                       <span style={styles.messageTime}>
                         {new Date(msg.createdAt).toLocaleTimeString()}
                       </span>
                     </div>
                   </div>
                 ))}
+                <div ref={messagesEndRef} />
               </div>
 
               <div style={styles.replyArea}>
                 <textarea
                   value={replyMessage}
                   onChange={(e) => setReplyMessage(e.target.value)}
-                  placeholder="Type a message... (Note: AI auto-replies are enabled)"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      sendReply();
+                    }
+                  }}
+                  placeholder={
+                    humanNeeded
+                      ? 'Type a reply to the customer...'
+                      : 'Type to reply as a human (this pauses AI for this chat)'
+                  }
                   style={styles.replyInput}
                   rows={2}
                 />
-                <button style={styles.sendBtn} disabled>
-                  Send (AI Auto-reply Enabled)
+                <button
+                  style={{
+                    ...styles.sendBtn,
+                    ...(sending || !replyMessage.trim() ? styles.sendBtnDisabled : {})
+                  }}
+                  disabled={sending || !replyMessage.trim()}
+                  onClick={sendReply}
+                >
+                  {sending ? 'Sending...' : 'Send'}
                 </button>
               </div>
             </>
@@ -191,6 +349,11 @@ const styles = {
     fontSize: '24px',
     fontWeight: '700',
     color: '#1e293b'
+  },
+  subtitle: {
+    fontSize: '14px',
+    color: '#64748b',
+    marginTop: '4px'
   },
   chatContainer: {
     flex: 1,
@@ -237,12 +400,27 @@ const styles = {
     color: '#64748b',
     marginBottom: '8px'
   },
+  badgeRow: {
+    display: 'flex',
+    gap: '6px',
+    alignItems: 'center',
+    flexWrap: 'wrap'
+  },
   convStatus: {
     display: 'inline-block',
     padding: '2px 8px',
     borderRadius: '10px',
     fontSize: '11px',
     color: '#fff'
+  },
+  waitingBadge: {
+    display: 'inline-block',
+    padding: '2px 8px',
+    borderRadius: '10px',
+    fontSize: '11px',
+    backgroundColor: '#fef3c7',
+    color: '#92400e',
+    fontWeight: '600'
   },
   messagesArea: {
     flex: 1,
@@ -268,7 +446,8 @@ const styles = {
   },
   statusActions: {
     display: 'flex',
-    gap: '8px'
+    gap: '8px',
+    alignItems: 'center'
   },
   statusSelect: {
     padding: '8px 12px',
@@ -276,6 +455,33 @@ const styles = {
     borderRadius: '6px',
     fontSize: '13px',
     outline: 'none'
+  },
+  takeOverBtn: {
+    padding: '8px 12px',
+    backgroundColor: '#fff',
+    color: '#1d4ed8',
+    border: '1px solid #bfdbfe',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontWeight: '500',
+    cursor: 'pointer'
+  },
+  returnBtn: {
+    padding: '8px 12px',
+    backgroundColor: '#ecfdf5',
+    color: '#047857',
+    border: '1px solid #a7f3d0',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontWeight: '500',
+    cursor: 'pointer'
+  },
+  handoffBanner: {
+    padding: '10px 20px',
+    backgroundColor: '#fffbeb',
+    color: '#92400e',
+    fontSize: '13px',
+    borderBottom: '1px solid #fde68a'
   },
   messagesList: {
     flex: 1,
@@ -296,6 +502,10 @@ const styles = {
   },
   messageAI: {
     backgroundColor: '#dbeafe',
+    alignSelf: 'flex-end'
+  },
+  messageAgent: {
+    backgroundColor: '#d1fae5',
     alignSelf: 'flex-end'
   },
   messageContent: {
@@ -330,12 +540,16 @@ const styles = {
   },
   sendBtn: {
     padding: '12px 24px',
-    backgroundColor: '#94a3b8',
+    backgroundColor: '#2563eb',
     color: '#fff',
     border: 'none',
     borderRadius: '8px',
     fontSize: '14px',
     fontWeight: '500',
+    cursor: 'pointer'
+  },
+  sendBtnDisabled: {
+    backgroundColor: '#94a3b8',
     cursor: 'not-allowed'
   },
   noSelection: {
