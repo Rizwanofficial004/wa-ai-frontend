@@ -19,7 +19,11 @@ const Login = () => {
       toast.success('Login successful!');
       navigate('/dashboard');
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Login failed');
+      if (!error.response) {
+        toast.error('Cannot reach the API. Start the backend (port 3003) and try again.');
+      } else {
+        toast.error(error.response.data?.message || 'Login failed');
+      }
     } finally {
       setLoading(false);
     }

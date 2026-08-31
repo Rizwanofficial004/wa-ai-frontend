@@ -1,7 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import api from '../services/api';
+import api, { businessApi } from '../services/api';
 import toast from 'react-hot-toast';
+
+const defaultWebhookUrl = () => {
+  const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:3003/api';
+  return `${String(apiUrl).replace(/\/api\/?$/, '')}/webhook/whatsapp`;
+};
+
+const newVerifyToken = () =>
+  process.env.REACT_APP_WHATSAPP_VERIFY_TOKEN || 'mywebhooksecret123';
+
+const isLocalWebhookUrl = (url) =>
+  /localhost|127\.0\.0\.1/.test(String(url || ''));
 
 const BusinessDetail = () => {
   const { businessId } = useParams();
@@ -19,8 +30,16 @@ const BusinessDetail = () => {
   });
   const [whatsappForm, setWhatsappForm] = useState({
     whatsappNumber: '',
-    phoneNumberId: ''
+    token: '',
+    verifyToken: newVerifyToken(),
+    phoneNumberId: '',
+    businessAccountId: '',
+    webhookUrl: defaultWebhookUrl()
   });
+  const [connecting, setConnecting] = useState(false);
+  const [showWebhookSteps, setShowWebhookSteps] = useState(false);
+  const [testPhone, setTestPhone] = useState('');
+  const [testing, setTesting] = useState(false);
 
   useEffect(() => {
     fetchBusiness();
@@ -37,10 +56,16 @@ const BusinessDetail = () => {
         aiPersonality: res.data.data.aiPersonality || '',
         welcomeMessage: res.data.data.welcomeMessage || ''
       });
+      const creds = res.data.data.whatsappCredentials || {};
       setWhatsappForm({
         whatsappNumber: res.data.data.whatsappNumber || '',
-        phoneNumberId: res.data.data.whatsappPhoneNumberId || ''
+        token: creds.token || '',
+        verifyToken: creds.verifyToken || newVerifyToken(),
+        phoneNumberId: creds.phoneNumberId || res.data.data.whatsappPhoneNumberId || '',
+        businessAccountId: creds.businessAccountId || '',
+        webhookUrl: creds.webhookUrl || defaultWebhookUrl()
       });
+      setShowWebhookSteps(Boolean(res.data.data.isWhatsAppConnected));
     } catch (error) {
       toast.error('Failed to fetch business');
       navigate('/businesses');
@@ -70,15 +95,58 @@ const BusinessDetail = () => {
     }
   };
 
+  const copyText = async (value, label) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(`${label} copied`);
+    } catch {
+      toast.error('Could not copy');
+    }
+  };
+
   const handleConnectWhatsApp = async (e) => {
     e.preventDefault();
+    if (!whatsappForm.whatsappNumber || !whatsappForm.token || !whatsappForm.phoneNumberId) {
+      toast.error('Phone number, access token, and phone number ID are required');
+      return;
+    }
+    setConnecting(true);
     try {
-      await api.post(`/businesses/${businessId}/whatsapp/connect`, whatsappForm);
-      toast.success('WhatsApp connected successfully!');
-      setShowWhatsAppModal(false);
+      const res = await businessApi.connectWhatsApp(businessId, whatsappForm);
+      const creds = res.data.data?.whatsappCredentials || {};
+      setWhatsappForm((prev) => ({
+        ...prev,
+        verifyToken: creds.verifyToken || prev.verifyToken,
+        webhookUrl: creds.webhookUrl || prev.webhookUrl
+      }));
+      setShowWebhookSteps(true);
+      toast.success('WhatsApp connected. AI auto-reply is on.');
       fetchBusiness();
     } catch (error) {
       toast.error(error.response?.data?.message || 'Failed to connect WhatsApp');
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const handleTestWhatsApp = async () => {
+    const raw = (testPhone || '').trim();
+    if (!raw) {
+      toast.error('Enter the recipient mobile number, e.g. +923041493401');
+      return;
+    }
+    if (!/\d{8,}/.test(raw.replace(/\D/g, '')) || /[a-zA-Z]/.test(raw)) {
+      toast.error('This field is a phone number, not a chat message. Example: +923041493401');
+      return;
+    }
+    setTesting(true);
+    try {
+      await businessApi.testWhatsApp(businessId, { testPhoneNumber: raw });
+      toast.success('Test message sent');
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Test message failed');
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -262,37 +330,147 @@ const BusinessDetail = () => {
       {showWhatsAppModal && (
         <div style={styles.modalOverlay}>
           <div style={styles.modal}>
-            <h2 style={styles.modalTitle}>Connect WhatsApp</h2>
+            <h2 style={styles.modalTitle}>Connect WhatsApp bot</h2>
+            <p style={styles.helpText}>
+              Paste credentials from Meta for Developers → WhatsApp → API Setup.
+              After connect, every customer message gets an AI auto-reply while the chatbot is enabled.
+            </p>
             <form onSubmit={handleConnectWhatsApp} style={styles.form}>
               <div style={styles.inputGroup}>
-                <label style={styles.label}>WhatsApp Business Number</label>
+                <label style={styles.label}>WhatsApp Business Number *</label>
                 <input
                   type="text"
                   value={whatsappForm.whatsappNumber}
                   onChange={(e) => setWhatsappForm({ ...whatsappForm, whatsappNumber: e.target.value })}
-                  placeholder="+1234567890"
+                  placeholder="+923001234567"
                   style={styles.input}
+                  required
                 />
               </div>
               <div style={styles.inputGroup}>
-                <label style={styles.label}>Phone Number ID (from Meta)</label>
+                <label style={styles.label}>Access Token * (paste new, then click Update & verify)</label>
+                <input
+                  type="password"
+                  value={whatsappForm.token}
+                  onChange={(e) => setWhatsappForm({ ...whatsappForm, token: e.target.value })}
+                  placeholder="Temporary or System User token from Meta"
+                  style={styles.input}
+                  required
+                />
+              </div>
+              <div style={styles.inputGroup}>
+                <label style={styles.label}>Phone Number ID *</label>
                 <input
                   type="text"
                   value={whatsappForm.phoneNumberId}
                   onChange={(e) => setWhatsappForm({ ...whatsappForm, phoneNumberId: e.target.value })}
-                  placeholder="Enter Phone Number ID"
+                  placeholder="From Meta API Setup"
+                  style={styles.input}
+                  required
+                />
+              </div>
+              <div style={styles.inputGroup}>
+                <label style={styles.label}>WhatsApp Business Account ID</label>
+                <input
+                  type="text"
+                  value={whatsappForm.businessAccountId}
+                  onChange={(e) => setWhatsappForm({ ...whatsappForm, businessAccountId: e.target.value })}
+                  placeholder="Optional"
                   style={styles.input}
                 />
               </div>
+              <div style={styles.inputGroup}>
+                <label style={styles.label}>Verify token (same value in Meta webhook)</label>
+                <input
+                  type="text"
+                  value={whatsappForm.verifyToken}
+                  onChange={(e) => setWhatsappForm({ ...whatsappForm, verifyToken: e.target.value })}
+                  style={styles.input}
+                />
+              </div>
+              <div style={styles.inputGroup}>
+                <label style={styles.label}>Webhook URL (public HTTPS, e.g. ngrok)</label>
+                <input
+                  type="text"
+                  value={whatsappForm.webhookUrl}
+                  onChange={(e) => setWhatsappForm({ ...whatsappForm, webhookUrl: e.target.value })}
+                  placeholder="https://xxxx.ngrok-free.app/webhook/whatsapp"
+                  style={styles.input}
+                />
+                <span style={styles.fieldHint}>
+                  Meta cannot reach localhost. You need a public HTTPS URL that forwards to port 3003.
+                </span>
+                {isLocalWebhookUrl(whatsappForm.webhookUrl) && (
+                  <div style={styles.localWarn}>
+                    This URL is localhost — Meta will reject it. In a new terminal run
+                    {' '}<code>npx --yes cloudflared tunnel --url http://localhost:3003</code>
+                    {' '}then paste <code>https://YOUR-TUNNEL/webhook/whatsapp</code> as the callback URL.
+                  </div>
+                )}
+              </div>
               <div style={styles.modalActions}>
                 <button type="button" onClick={() => setShowWhatsAppModal(false)} style={styles.cancelBtn}>
-                  Cancel
+                  {showWebhookSteps ? 'Done' : 'Cancel'}
                 </button>
-                <button type="submit" style={styles.submitBtn}>
-                  Connect
+                <button type="submit" disabled={connecting} style={styles.submitBtn}>
+                  {connecting ? 'Connecting...' : (business.isWhatsAppConnected ? 'Update & verify' : 'Connect bot')}
                 </button>
               </div>
             </form>
+
+            {showWebhookSteps && (
+              <div style={styles.stepsBox}>
+                <h3 style={styles.stepsTitle}>Finish in Meta so replies can arrive</h3>
+                <ol style={styles.stepsList}>
+                  <li>WhatsApp → Configuration → Webhook</li>
+                  <li>Callback URL — paste the webhook URL below</li>
+                  <li>Verify token — paste the token below</li>
+                  <li>Subscribe to <strong>messages</strong></li>
+                </ol>
+                <div style={styles.copyRow}>
+                  <code style={styles.codeValue}>{whatsappForm.webhookUrl || 'Set a public webhook URL'}</code>
+                  <button
+                    type="button"
+                    style={styles.copyBtn}
+                    onClick={() => copyText(whatsappForm.webhookUrl, 'Webhook URL')}
+                    disabled={!whatsappForm.webhookUrl}
+                  >
+                    Copy
+                  </button>
+                </div>
+                <div style={styles.copyRow}>
+                  <code style={styles.codeValue}>{whatsappForm.verifyToken}</code>
+                  <button
+                    type="button"
+                    style={styles.copyBtn}
+                    onClick={() => copyText(whatsappForm.verifyToken, 'Verify token')}
+                  >
+                    Copy
+                  </button>
+                </div>
+                <div style={styles.testRow}>
+                  <input
+                    type="tel"
+                    value={testPhone}
+                    onChange={(e) => setTestPhone(e.target.value)}
+                    placeholder="+923041493401"
+                    style={styles.input}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleTestWhatsApp}
+                    disabled={testing}
+                    style={styles.submitBtn}
+                  >
+                    {testing ? 'Sending...' : 'Send test'}
+                  </button>
+                </div>
+                <span style={styles.fieldHint}>
+                  Your phone that has WhatsApp, with country code. Example: +923041493401.
+                  Do not use the business number. Local 03… is converted to +92… automatically.
+                </span>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -482,7 +660,7 @@ const styles = {
     borderRadius: '16px',
     padding: '32px',
     width: '100%',
-    maxWidth: '500px',
+    maxWidth: '560px',
     maxHeight: '90vh',
     overflow: 'auto'
   },
@@ -490,7 +668,13 @@ const styles = {
     fontSize: '20px',
     fontWeight: '600',
     color: '#1e293b',
-    marginBottom: '24px'
+    marginBottom: '8px'
+  },
+  helpText: {
+    fontSize: '13px',
+    color: '#64748b',
+    lineHeight: 1.5,
+    marginBottom: '20px'
   },
   form: {
     display: 'flex',
@@ -538,7 +722,75 @@ const styles = {
     borderRadius: '8px',
     fontSize: '14px',
     fontWeight: '500',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap'
+  },
+  fieldHint: {
+    fontSize: '12px',
+    color: '#94a3b8',
+    lineHeight: 1.4
+  },
+  localWarn: {
+    marginTop: '8px',
+    padding: '10px 12px',
+    backgroundColor: '#fff7ed',
+    border: '1px solid #fdba74',
+    borderRadius: '8px',
+    color: '#9a3412',
+    fontSize: '12px',
+    lineHeight: 1.5
+  },
+  stepsBox: {
+    marginTop: '24px',
+    padding: '16px',
+    backgroundColor: '#f8fafc',
+    borderRadius: '12px',
+    border: '1px solid #e2e8f0'
+  },
+  stepsTitle: {
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#1e293b',
+    margin: '0 0 8px'
+  },
+  stepsList: {
+    margin: '0 0 16px',
+    paddingLeft: '18px',
+    color: '#475569',
+    fontSize: '13px',
+    lineHeight: 1.6
+  },
+  copyRow: {
+    display: 'flex',
+    gap: '8px',
+    alignItems: 'center',
+    marginBottom: '8px'
+  },
+  codeValue: {
+    flex: 1,
+    fontSize: '12px',
+    backgroundColor: '#fff',
+    border: '1px solid #e5e7eb',
+    borderRadius: '8px',
+    padding: '10px 12px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap'
+  },
+  copyBtn: {
+    padding: '10px 12px',
+    backgroundColor: '#e2e8f0',
+    color: '#334155',
+    border: 'none',
+    borderRadius: '8px',
+    fontSize: '12px',
+    fontWeight: '600',
     cursor: 'pointer'
+  },
+  testRow: {
+    display: 'flex',
+    gap: '8px',
+    marginTop: '12px'
   }
 };
 
