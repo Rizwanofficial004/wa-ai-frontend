@@ -113,7 +113,7 @@ const Layout = () => {
               <div style={styles.userDetails}>
                 <span style={styles.userName}>{user?.firstName || 'User'}</span>
                 <span style={styles.userEmail}>{user?.email}</span>
-                <span style={{...styles.roleBadge, backgroundColor: isAgent ? '#dcfce7' : '#e0e7ff', color: isAgent ? '#166534' : '#4338ca'}}>
+                <span style={styles.roleBadge}>
                   {isAgent ? 'Agent' : 'Owner'}
                 </span>
               </div>
@@ -276,11 +276,10 @@ const styles = {
   },
   roleBadge: {
     fontSize: '10px',
-    padding: '2px 6px',
-    borderRadius: '4px',
     fontWeight: '500',
     marginTop: '4px',
-    textAlign: 'left'
+    textAlign: 'left',
+    color: '#64748b'
   },
   logoutBtn: {
     padding: '10px',
