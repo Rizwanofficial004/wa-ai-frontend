@@ -14,6 +14,7 @@ import Orders from './pages/Orders';
 import Leads from './pages/Leads';
 import Settings from './pages/Settings';
 import Products from './pages/Products';
+import Services from './pages/Services';
 
 // New SaaS Pages
 import Analytics from './pages/Analytics';
@@ -71,6 +72,7 @@ function App() {
         <Route path="businesses/:businessId/conversations" element={<Conversations />} />
         <Route path="businesses/:businessId/knowledge" element={<KnowledgeBase />} />
         <Route path="businesses/:businessId/products" element={<Products />} />
+        <Route path="businesses/:businessId/services" element={<Services />} />
         <Route path="businesses/:businessId/orders" element={<Orders />} />
         <Route path="businesses/:businessId/leads" element={<Leads />} />
         <Route path="businesses/:businessId/settings" element={<Settings />} />

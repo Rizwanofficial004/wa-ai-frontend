@@ -35,6 +35,7 @@ const Layout = () => {
     { path: `/businesses/${businessId}/leads`, icon: '🎯', label: 'Leads', ownerOnly: false },
     { path: `/businesses/${businessId}/orders`, icon: '📦', label: 'Orders', ownerOnly: false },
     { path: `/businesses/${businessId}/products`, icon: '🛍️', label: 'Products', ownerOnly: false },
+    { path: `/businesses/${businessId}/services`, icon: '💉', label: 'Services', ownerOnly: false },
     { path: `/businesses/${businessId}/knowledge`, icon: '📚', label: 'Knowledge', ownerOnly: false },
     { path: `/businesses/${businessId}/tags`, icon: '🏷️', label: 'Tags', ownerOnly: false },
     { path: `/businesses/${businessId}/settings`, icon: '⚙️', label: 'Settings', ownerOnly: true }

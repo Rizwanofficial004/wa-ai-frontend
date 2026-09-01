@@ -25,6 +25,28 @@ const QUICK_ACTION_TYPES = [
   { value: 'custom', label: 'Custom Action' }
 ];
 
+const HOUR_DAYS = [
+  { key: 'monday', label: 'Monday' },
+  { key: 'tuesday', label: 'Tuesday' },
+  { key: 'wednesday', label: 'Wednesday' },
+  { key: 'thursday', label: 'Thursday' },
+  { key: 'friday', label: 'Friday' },
+  { key: 'saturday', label: 'Saturday' },
+  { key: 'sunday', label: 'Sunday' }
+];
+
+const emptyBusinessHours = () => ({
+  enabled: true,
+  timezone: 'Asia/Karachi',
+  monday: { open: '', close: '', closed: false },
+  tuesday: { open: '', close: '', closed: false },
+  wednesday: { open: '', close: '', closed: false },
+  thursday: { open: '', close: '', closed: false },
+  friday: { open: '', close: '', closed: false },
+  saturday: { open: '', close: '', closed: false },
+  sunday: { open: '', close: '', closed: false }
+});
+
 const ToggleSwitch = ({ checked, onChange }) => (
   <label style={styles.switch}>
     <input
@@ -83,7 +105,8 @@ const Settings = () => {
       enableOrderFlow: false,
       enableAppointmentBooking: false,
       enableQuoteRequests: false
-    }
+    },
+    businessHours: emptyBusinessHours()
   });
 
   useEffect(() => {
@@ -111,6 +134,10 @@ const Settings = () => {
           enableOrderFlow: false,
           enableAppointmentBooking: false,
           enableQuoteRequests: false
+        },
+        businessHours: {
+          ...emptyBusinessHours(),
+          ...(res.data.data.businessHours || {})
         }
       });
     } catch (error) {
@@ -325,6 +352,79 @@ const Settings = () => {
               This message will be sent automatically to new customers.
             </p>
           </div>
+        </div>
+
+        <div style={styles.section}>
+          <h2 style={styles.sectionTitle}>Opening hours</h2>
+          <p style={styles.sectionDesc}>
+            WhatsApp uses these hours when someone asks “what time are you open?”. Leave a day blank if it varies.
+          </p>
+
+          <div style={styles.toggleGroup}>
+            <div style={styles.toggleInfo}>
+              <span style={styles.toggleLabel}>Share hours in chat</span>
+              <span style={styles.toggleDesc}>If this is off, the bot offers Talk to team instead of guessing</span>
+            </div>
+            <ToggleSwitch
+              checked={formData.businessHours.enabled}
+              onChange={(e) => setFormData({
+                ...formData,
+                businessHours: { ...formData.businessHours, enabled: e.target.checked }
+              })}
+            />
+          </div>
+
+          {HOUR_DAYS.map((day) => {
+            const slot = formData.businessHours[day.key] || { open: '', close: '', closed: false };
+            return (
+              <div key={day.key} style={styles.hoursRow}>
+                <span style={styles.hoursDay}>{day.label}</span>
+                <label style={styles.hoursClosed}>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(slot.closed)}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      businessHours: {
+                        ...formData.businessHours,
+                        [day.key]: { ...slot, closed: e.target.checked, open: e.target.checked ? '' : slot.open, close: e.target.checked ? '' : slot.close }
+                      }
+                    })}
+                  />
+                  Closed
+                </label>
+                <input
+                  type="time"
+                  disabled={Boolean(slot.closed)}
+                  value={slot.open || ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    businessHours: {
+                      ...formData.businessHours,
+                      enabled: true,
+                      [day.key]: { ...slot, open: e.target.value, closed: false }
+                    }
+                  })}
+                  style={styles.hoursTime}
+                />
+                <span style={{ color: '#94a3b8', fontSize: 12 }}>to</span>
+                <input
+                  type="time"
+                  disabled={Boolean(slot.closed)}
+                  value={slot.close || ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    businessHours: {
+                      ...formData.businessHours,
+                      enabled: true,
+                      [day.key]: { ...slot, close: e.target.value, closed: false }
+                    }
+                  })}
+                  style={styles.hoursTime}
+                />
+              </div>
+            );
+          })}
         </div>
 
         {/* Features Section */}
@@ -1044,6 +1144,33 @@ const styles = {
     color: '#64748b',
     marginBottom: '16px',
     marginTop: '-12px'
+  },
+  hoursRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    marginBottom: '8px',
+    flexWrap: 'wrap'
+  },
+  hoursDay: {
+    width: '92px',
+    fontSize: '13px',
+    color: '#334155',
+    fontWeight: 500
+  },
+  hoursClosed: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontSize: '12px',
+    color: '#64748b',
+    minWidth: '72px'
+  },
+  hoursTime: {
+    padding: '6px 8px',
+    border: '1px solid #e2e8f0',
+    borderRadius: '8px',
+    fontSize: '13px'
   },
   quickActionsList: {
     marginBottom: '16px'

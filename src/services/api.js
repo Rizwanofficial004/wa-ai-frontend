@@ -222,6 +222,13 @@ export const productApi = {
   getCategories: (businessId) => api.get(`/businesses/${businessId}/products/categories`)
 };
 
+export const serviceApi = {
+  getAll: (businessId) => api.get(`/businesses/${businessId}/services`),
+  create: (businessId, data) => api.post(`/businesses/${businessId}/services`, data),
+  update: (businessId, serviceId, data) => api.put(`/businesses/${businessId}/services/${serviceId}`, data),
+  delete: (businessId, serviceId) => api.delete(`/businesses/${businessId}/services/${serviceId}`)
+};
+
 // =====================
 // INVITE API (NEW)
 // =====================
